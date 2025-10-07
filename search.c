@@ -1,1 +1,1 @@
-#Busqueda
+/* Busqueda */

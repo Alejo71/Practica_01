@@ -1,2 +1,2 @@
-#Datos del programa
+/* Datos del programa */
 

@@ -1,1 +1,1 @@
-#menú de busqueda
+/* menú de busqueda */
