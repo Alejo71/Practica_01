@@ -76,4 +76,18 @@ char* buscar_por_clave(FILE *f, const char *clave, char *buffer_out) {
         n = n->siguiente;
     }
     return NULL;
+
+    
 }
+void liberar_tabla() {
+    for (int i = 0; i < TAM_TABLA; ++i) {
+        Nodo *actual = tabla[i];
+        while (actual) {
+            Nodo *temp = actual;
+            actual = actual->siguiente;
+            free(temp);
+        }
+        tabla[i] = NULL;
+    }
+}
+

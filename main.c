@@ -123,9 +123,11 @@ void proceso_hijo_busqueda(int read_fd, int write_fd, const char *ruta_csv) {
             break;
         }
     }
-
+    
+    liberar_tabla();
     fclose(f);
-    // liberar memoria de la tabla (opcional)
+    
+    
     _exit(0);
 }
 

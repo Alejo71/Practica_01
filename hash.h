@@ -27,5 +27,5 @@ int indice_de_hash(const char *clave);
 void insertar_indice(const char *clave, long offset);
 void construir_indice(FILE *f);
 char* buscar_por_clave(FILE *f, const char *clave, char *buffer_out);
-
+void liberar_tabla();
 #endif // HASH_H
