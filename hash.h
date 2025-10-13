@@ -6,7 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "xxhash.h" // asegúrate de tener lib/xxhash/xxhash.h y ajustar include path en el Makefile
+#include "lib/xxhash/xxhash.h"
+ // asegúrate de tener lib/xxhash/xxhash.h y ajustar include path en el Makefile
 #include <sys/types.h>
 
 #define TAM_TABLA 100003  // tamaño primo (ajustable)

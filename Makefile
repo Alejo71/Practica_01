@@ -1,19 +1,14 @@
-# Makefile
 CC = gcc
-CFLAGS = -O2 -Wall -Wextra -std=gnu11
-INCLUDES = -I./lib/xxhash
-SRCS = main.c hash.c
-OBJS = $(SRCS:.c=.o)
-LIBSRC = lib/xxhash/xxhash.c
+CFLAGS = -Wall -O2 -Ilib/xxhash
+LIBS = -lrt -lpthread
 
-all: p1_hash
+all: ui search
 
-# Sino quieres compilar xxhash desde el repo, puedes ajustar LIBSRC o compilar xxhash como librería.
-p1_hash: $(OBJS) $(LIBSRC)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBSRC)
+ui: ui.c
+	$(CC) $(CFLAGS) ui.c -o ui $(LIBS)
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+search: search.c hash.c lib/xxhash/xxhash.c
+	$(CC) $(CFLAGS) search.c hash.c lib/xxhash/xxhash.c -o search $(LIBS)
 
 clean:
-	rm -f *.o p1_hash
+	rm -f ui search
