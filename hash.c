@@ -1,5 +1,8 @@
+// ...existing code...
 // hash.c
 #include "hash.h"
+#include <errno.h>
+#include <ctype.h>
 
 Nodo* tabla[TAM_TABLA];
 
@@ -17,7 +20,7 @@ int indice_de_hash(const char *clave) {
     return (int)(h % TAM_TABLA);
 }
 
-void insertar_indice(const char *clave, long offset) {
+void insertar_indice(const char *clave, off_t offset) {
     int idx = indice_de_hash(clave);
     Nodo *n = (Nodo*) malloc(sizeof(Nodo));
     if (!n) { perror("malloc"); exit(1); }
@@ -28,29 +31,52 @@ void insertar_indice(const char *clave, long offset) {
     tabla[idx] = n;
 }
 
+/* Extrae el primer campo CSV de 's' (maneja comillas y trim). Devuelve 1 si extrajo algo. */
+static int extract_first_field(const char* s, char* out, size_t max) {
+    size_t i = 0;
+    if (!s || !out || max == 0) return 0;
+    // Saltar espacios iniciales
+    while (*s && (*s == ' ' || *s == '\t')) ++s;
+    if (*s == '"') {
+        ++s; // dentro de comillas
+        while (*s && *s != '"' && i + 1 < max) { out[i++] = *s++; }
+        out[i] = '\0';
+        return (i > 0) ? 1 : 0;
+    } else {
+        while (*s && *s != ',' && *s != '\n' && *s != '\r' && i + 1 < max) { out[i++] = *s++; }
+        // trim trailing spaces
+        while (i > 0 && (out[i-1] == ' ' || out[i-1] == '\t')) --i;
+        out[i] = '\0';
+        return (i > 0) ? 1 : 0;
+    }
+}
+
 void construir_indice(FILE *f) {
     init_tabla();
 
-    char linea[LINEA_MAX];
-    long offset;
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t nread;
 
     // Saltar cabecera (suponemos una línea de cabecera)
-    offset = ftell(f);
-    if (!fgets(linea, sizeof(linea), f)) return; // archivo vacío
-    offset = ftell(f);
+    if ((nread = getline(&line, &len, f)) == -1) {
+        free(line);
+        return; // archivo vacío o error
+    }
 
     while (1) {
-        long pos = offset; // posición donde empieza la próxima línea
-        if (!fgets(linea, sizeof(linea), f)) break;
+        off_t pos = ftello(f);
+        if (pos == -1) break;
+        nread = getline(&line, &len, f);
+        if (nread == -1) break;
 
-        // parsear primer campo (antes de la primera coma)
         char clave[CLAVE_MAX];
-        // si la línea tiene menos de 1 char, continuar
-        if (sscanf(linea, " %127[^,\n\r]", clave) >= 1) {
+        if (extract_first_field(line, clave, sizeof(clave))) {
             insertar_indice(clave, pos);
         }
-        offset = ftell(f);
     }
+
+    free(line);
 }
 
 char* buscar_por_clave(FILE *f, const char *clave, char *buffer_out) {
@@ -59,7 +85,7 @@ char* buscar_por_clave(FILE *f, const char *clave, char *buffer_out) {
     while (n) {
         if (strcmp(n->clave, clave) == 0) {
             // leer registro desde offset
-            if (fseek(f, n->offset, SEEK_SET) == 0) {
+            if (fseeko(f, n->offset, SEEK_SET) == 0) {
                 if (fgets(buffer_out, RESP_MAX, f)) {
                     // quitar newline final
                     size_t L = strlen(buffer_out);
@@ -76,9 +102,8 @@ char* buscar_por_clave(FILE *f, const char *clave, char *buffer_out) {
         n = n->siguiente;
     }
     return NULL;
-
-    
 }
+
 void liberar_tabla() {
     for (int i = 0; i < TAM_TABLA; ++i) {
         Nodo *actual = tabla[i];
@@ -90,4 +115,3 @@ void liberar_tabla() {
         tabla[i] = NULL;
     }
 }
-
