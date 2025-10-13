@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <semaphore.h>
+#include <time.h>       // ← necesario para clock_gettime
 #include "shm_defs.h"
 #include "hash.h"
 
@@ -16,16 +17,28 @@ int main(int argc, char **argv) {
 
     const char *ruta_csv = argv[1];
 
-    // Conectar con la memoria compartida
-    int fd = shm_open(SHM_NAME, O_RDWR, 0666);
-    if (fd == -1) { perror("shm_open"); exit(1); }
+    // Conectar o crear la memoria compartida
+    int fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if (fd == -1) {
+        perror("shm_open");
+        exit(1);
+    }
 
+    // Ajustar tamaño del segmento (una sola vez)
+    ftruncate(fd, sizeof(shm_data));
+
+    // Mapear el segmento en el espacio de direcciones
     shm_data *data = mmap(NULL, sizeof(shm_data),
                           PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
-    // Abrir semáforos existentes
-    sem_t *sem_req = sem_open(SEM_REQ, 0);
-    sem_t *sem_res = sem_open(SEM_RES, 0);
+    if (data == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+
+    // Abrir semáforos existentes o crearlos
+    sem_t *sem_req = sem_open(SEM_REQ, O_CREAT, 0666, 0);
+    sem_t *sem_res = sem_open(SEM_RES, O_CREAT, 0666, 0);
 
     if (sem_req == SEM_FAILED || sem_res == SEM_FAILED) {
         perror("sem_open");
@@ -34,7 +47,10 @@ int main(int argc, char **argv) {
 
     // Cargar dataset e índice hash
     FILE *f = fopen(ruta_csv, "r");
-    if (!f) { perror("abrir dataset"); exit(1); }
+    if (!f) {
+        perror("abrir dataset");
+        exit(1);
+    }
 
     construir_indice(f);
     printf("Buscador listo. Índice construido.\n");
@@ -44,13 +60,27 @@ int main(int argc, char **argv) {
         sem_wait(sem_req);
 
         // Verificar si debe salir
-        if (strcmp(data->query, "<<EXIT>>") == 0) break;
+        if (strcmp(data->query, "<<EXIT>>") == 0)
+            break;
 
         char temp[RESP_MAX];
-        char *res = buscar_por_clave(f, data->query, temp);
+        char *res = NULL;
 
+        // Medir tiempo de búsqueda
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+
+        res = buscar_por_clave(f, data->query, temp);
+
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        double tiempo = (end.tv_sec - start.tv_sec) +
+                        (end.tv_nsec - start.tv_nsec) / 1e9;
+
+        printf("Tiempo de búsqueda: %.6f segundos\n", tiempo);
+
+        // Guardar resultado en memoria compartida
         if (res)
-            strncpy(data->result, res, BUF_SZ);
+            strncpy(data->result, res, BUF_SZ - 1);
         else
             strcpy(data->result, "NA");
 
@@ -67,5 +97,7 @@ int main(int argc, char **argv) {
     shm_unlink(SHM_NAME);
     sem_unlink(SEM_REQ);
     sem_unlink(SEM_RES);
+
+    printf("Buscador finalizado correctamente.\n");
     return 0;
 }

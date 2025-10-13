@@ -14,8 +14,9 @@
  *
  * Para ejecutar:
  *   1. Compilar con: make
- *   2. En una terminal: ./buscador dataset.csv
- *   3. En otra terminal: ./ui
+ *   2. En otra terminal: ./ui
+ *   3. En una terminal: ./serch dataset.csv
+ *   
  */
 
 #include <stdio.h>
