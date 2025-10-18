@@ -9,7 +9,7 @@
 #include "lib/xxhash/xxhash.h"
 #include <sys/types.h>
 
-#define TAM_TABLA 100003  // tamaño primo (ajustable)
+#define TAM_TABLA 1000  
 #define CLAVE_MAX 128
 #define LINEA_MAX 2048
 #define RESP_MAX 2048
