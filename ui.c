@@ -30,7 +30,7 @@ int main() {
 
     while (1) {
         printf("\n--- MENU ---\n");
-        printf("1) Buscar registro por clave (primer campo)\n");
+        printf("1) Buscar registro por título (segunda columna)\n");
         printf("2) Salir\n> ");
         char opcion[8];
         fgets(opcion, sizeof(opcion), stdin);
@@ -43,7 +43,7 @@ int main() {
         }
 
         if (op == 1) {
-            printf("Ingrese clave: ");
+            printf("Ingrese título (exacto o igual a como aparece en CSV): ");
             fgets(data->query, sizeof(data->query), stdin);
             data->query[strcspn(data->query, "\n")] = '\0';
 

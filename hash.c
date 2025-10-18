@@ -1,68 +1,148 @@
-// ...existing code...
-// hash.c
+// hash.c (versión modificada para indexar por N-ésima columna, aquí usamos la columna 2)
 #include "hash.h"
 #include <errno.h>
 #include <ctype.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/stat.h>
 
-Nodo* tabla[TAM_TABLA];
+int32_t tabla[TAM_TABLA];
+Nodo *nodes = NULL;
+int32_t nodes_capacity = 0;
+int32_t nodes_count = 0;
 
-void init_tabla() {
-    for (int i = 0; i < TAM_TABLA; ++i) tabla[i] = NULL;
+void init_tabla(void) {
+    for (int i = 0; i < TAM_TABLA; ++i) tabla[i] = -1;
+    nodes_count = 0;
+}
+
+static size_t max_nodes_for_limit(size_t limit_bytes) {
+    size_t per = sizeof(Nodo);
+    if (per == 0) return 0;
+    return limit_bytes / per;
+}
+
+void reservar_pool_nodos(size_t expected) {
+    const size_t MEM_LIM_MB = 9; // dejar margen para código/stack/otras estructuras
+    size_t max_nodes = max_nodes_for_limit(MEM_LIM_MB * 1024 * 1024);
+    size_t want = expected ? expected : 1024;
+    if (want > max_nodes) want = max_nodes;
+    if (want < 16) want = 16;
+    nodes = (Nodo*) calloc(want, sizeof(Nodo));
+    if (!nodes) { perror("calloc nodes"); exit(1); }
+    nodes_capacity = (int32_t) want;
+    nodes_count = 0;
 }
 
 unsigned long long calcular_hash64(const char *clave) {
-    // Usamos XXH64 (seed = 0)
     return (unsigned long long) XXH64(clave, strlen(clave), 0);
 }
 
-int indice_de_hash(const char *clave) {
-    unsigned long long h = calcular_hash64(clave);
+int indice_de_hash_from_u64(uint64_t h) {
     return (int)(h % TAM_TABLA);
 }
 
-void insertar_indice(const char *clave, off_t offset) {
-    int idx = indice_de_hash(clave);
-    Nodo *n = (Nodo*) malloc(sizeof(Nodo));
-    if (!n) { perror("malloc"); exit(1); }
-    strncpy(n->clave, clave, CLAVE_MAX-1);
-    n->clave[CLAVE_MAX-1] = '\0';
-    n->offset = offset;
-    n->siguiente = tabla[idx];
-    tabla[idx] = n;
+static void to_lower_str(char *s) {
+    for (; *s; ++s) *s = (char) tolower((unsigned char)*s);
 }
 
-/* Extrae el primer campo CSV de 's' (maneja comillas y trim). Devuelve 1 si extrajo algo. */
-static int extract_first_field(const char* s, char* out, size_t max) {
-    size_t i = 0;
-    if (!s || !out || max == 0) return 0;
-    // Saltar espacios iniciales
-    while (*s && (*s == ' ' || *s == '\t')) ++s;
-    if (*s == '"') {
-        ++s; // dentro de comillas
-        while (*s && *s != '"' && i + 1 < max) { out[i++] = *s++; }
+/*
+ * Extrae el campo n-ésimo (1-based) de la línea CSV 's' en 'out'.
+ * Maneja campos entre comillas (") y comillas escapadas ("").
+ * Devuelve 1 si extrajo algo (incluso cadena vacía) y 0 si no existe ese campo.
+ */
+static int extract_nth_field(const char* s, int n, char* out, size_t max) {
+    if (!s || !out || max == 0 || n <= 0) return 0;
+    const char *p = s;
+    int field = 1;
+
+    while (*p && field <= n) {
+        size_t i = 0;
+        // Saltar espacios iniciales del campo
+        while (*p == ' ' || *p == '\t') ++p;
+
+        if (*p == '"') {
+            // campo entre comillas
+            ++p; // saltar "
+            while (*p) {
+                if (*p == '"' && *(p+1) == '"') {
+                    if (i + 1 < max) out[i++] = '"';
+                    p += 2;
+                } else if (*p == '"') {
+                    ++p;
+                    break;
+                } else {
+                    if (i + 1 < max) out[i++] = *p;
+                    ++p;
+                }
+            }
+            while (*p && *p != ',') ++p;
+        } else {
+            while (*p && *p != ',' && *p != '\n' && *p != '\r') {
+                if (i + 1 < max) out[i++] = *p;
+                ++p;
+            }
+            while (i > 0 && (out[i-1] == ' ' || out[i-1] == '\t')) --i;
+        }
+
         out[i] = '\0';
-        return (i > 0) ? 1 : 0;
-    } else {
-        while (*s && *s != ',' && *s != '\n' && *s != '\r' && i + 1 < max) { out[i++] = *s++; }
-        // trim trailing spaces
-        while (i > 0 && (out[i-1] == ' ' || out[i-1] == '\t')) --i;
-        out[i] = '\0';
-        return (i > 0) ? 1 : 0;
+
+        if (field == n) {
+            return 1;
+        }
+
+        if (*p == ',') ++p;
+        ++field;
     }
+
+    return 0;
+}
+
+void insertar_indice(const char *clave_orig, off_t offset) {
+    char clave[CLAVE_MAX];
+    strncpy(clave, clave_orig, CLAVE_MAX-1);
+    clave[CLAVE_MAX-1] = '\0';
+    to_lower_str(clave); // normalizar
+
+    uint64_t h = calcular_hash64(clave);
+    int idx = indice_de_hash_from_u64(h);
+
+    if (!nodes || nodes_count >= nodes_capacity) {
+        // pool lleno -> no insertar más para mantener límite de memoria
+        return;
+    }
+
+    int32_t id = nodes_count++;
+    nodes[id].hash = h;
+    nodes[id].offset = offset;
+    nodes[id].siguiente = tabla[idx];
+    tabla[idx] = id;
 }
 
 void construir_indice(FILE *f) {
     init_tabla();
 
+    // Estimar número de líneas por tamaño de archivo
+    struct stat st;
+    size_t expected = 0;
+    if (fstat(fileno(f), &st) == 0 && st.st_size > 0) {
+        size_t avg_line = 120; // ajustar si es necesario
+        expected = (size_t)(st.st_size / avg_line);
+    }
+    reservar_pool_nodos(expected + 16);
+
     char *line = NULL;
     size_t len = 0;
     ssize_t nread;
 
-    // Saltar cabecera (suponemos una línea de cabecera)
+    // Saltar cabecera (si existe)
     if ((nread = getline(&line, &len, f)) == -1) {
         free(line);
-        return; // archivo vacío o error
+        return;
     }
+
+    const int COL_A_INDEXAR = 2;
 
     while (1) {
         off_t pos = ftello(f);
@@ -71,47 +151,56 @@ void construir_indice(FILE *f) {
         if (nread == -1) break;
 
         char clave[CLAVE_MAX];
-        if (extract_first_field(line, clave, sizeof(clave))) {
-            insertar_indice(clave, pos);
+        if (extract_nth_field(line, COL_A_INDEXAR, clave, sizeof(clave))) {
+            if (strlen(clave) > 0) {
+                insertar_indice(clave, pos);
+            }
         }
     }
 
     free(line);
 }
 
-char* buscar_por_clave(FILE *f, const char *clave, char *buffer_out) {
-    int idx = indice_de_hash(clave);
-    Nodo *n = tabla[idx];
-    while (n) {
-        if (strcmp(n->clave, clave) == 0) {
-            // leer registro desde offset
-            if (fseeko(f, n->offset, SEEK_SET) == 0) {
+/*
+ * Buscar por 'clave' (user input). Compara hashes y verifica leyendo el registro.
+ */
+char* buscar_por_clave(FILE *f, const char *clave_orig, char *buffer_out) {
+    char clave_norm[CLAVE_MAX];
+    strncpy(clave_norm, clave_orig, CLAVE_MAX-1);
+    clave_norm[CLAVE_MAX-1] = '\0';
+    to_lower_str(clave_norm);
+
+    uint64_t h = calcular_hash64(clave_norm);
+    int idx = indice_de_hash_from_u64(h);
+    int32_t cur = tabla[idx];
+
+    while (cur != -1) {
+        if (nodes[cur].hash == h) {
+            if (fseeko(f, nodes[cur].offset, SEEK_SET) == 0) {
                 if (fgets(buffer_out, RESP_MAX, f)) {
                     // quitar newline final
                     size_t L = strlen(buffer_out);
                     while (L > 0 && (buffer_out[L-1] == '\n' || buffer_out[L-1] == '\r')) {
-                        buffer_out[L-1] = '\0';
-                        --L;
+                        buffer_out[--L] = '\0';
                     }
-                    return buffer_out;
+                    // extraer la clave real y comparar normalizada
+                    char clave_leida[CLAVE_MAX];
+                    if (extract_nth_field(buffer_out, 2, clave_leida, sizeof(clave_leida))) {
+                        to_lower_str(clave_leida);
+                        if (strcmp(clave_leida, clave_norm) == 0) {
+                            return buffer_out;
+                        }
+                    }
                 }
             }
-            // si no pudo leer, devolver NULL
-            return NULL;
         }
-        n = n->siguiente;
+        cur = nodes[cur].siguiente;
     }
     return NULL;
 }
 
-void liberar_tabla() {
-    for (int i = 0; i < TAM_TABLA; ++i) {
-        Nodo *actual = tabla[i];
-        while (actual) {
-            Nodo *temp = actual;
-            actual = actual->siguiente;
-            free(temp);
-        }
-        tabla[i] = NULL;
-    }
+void liberar_tabla(void) {
+    if (nodes) { free(nodes); nodes = NULL; }
+    nodes_capacity = nodes_count = 0;
+    for (int i = 0; i < TAM_TABLA; ++i) tabla[i] = -1;
 }
