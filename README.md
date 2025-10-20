@@ -56,3 +56,5 @@ El sistema permite buscar registros utilizando un criterio:
 
 Desde el directorio del proyecto:
 ```sh
+./search /ruta/al/dataset.csv
+"En otra terminal" ./ui
