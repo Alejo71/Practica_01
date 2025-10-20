@@ -22,18 +22,37 @@ id,nombre,otros_campos...
 
 ## Criterios de Búsqueda Implementados
 
-El sistema permite buscar registros utilizando dos criterios:
+El sistema permite buscar registros utilizando un criterio:
 
-1. **Por clave (ID):**
-   - Busca el registro cuyo primer campo coincide exactamente con la clave ingresada.
+1. **Por nombre:**
+   - Busca el registro cuyo segundo campo coincide exactamente con la clave ingresada.
    - Utiliza una tabla hash para acelerar la búsqueda.
 
 
-## Adaptaciones Realizadas
+## Funcionamiento del código
 
-- Se implementó una tabla hash en memoria para indexar los registros por clave y permitir búsquedas eficientes.
-- Se utiliza memoria compartida (`shm_open`, `mmap`) para la comunicación entre la interfaz de usuario y el proceso de búsqueda.
-- Se emplean semáforos POSIX para la sincronización entre procesos, asegurando la correcta coordinación de las consultas y respuestas.
-- La interfaz de usuario permite ingresar la clave a buscar y muestra el resultado obtenido desde el proceso de búsqueda.
-- El código está modularizado en archivos separados para la interfaz, la lógica de búsqueda y la gestión de la tabla hash.
-- Se documenta el uso de recursos del sistema operativo (memoria compartida y semáforos) y la estructura de datos utilizada para el índice.
+- search.c
+- Abre el CSV y construye un índice en memoria (tabla hash) que mapea claves a offsets en el archivo.
+- Se queda en ejecución esperando consultas desde la interfaz mediante memoria compartida.
+- Al recibir una consulta, busca en la tabla hash, verifica leyendo el registro en el archivo y devuelve el resultado a la interfaz.
+
+- hash.c / hash.h
+- Implementan la tabla hash y las operaciones de inserción y búsqueda.
+- El índice almacena información necesaria para localizar el registro en disco (por ejemplo, hash y offset) y resuelve colisiones mediante listas enlazadas.
+- Al buscar, tras localizar candidatos por hash se lee la línea en el archivo y se compara la clave real para asegurar coincidencia.
+
+- ui.c
+- Interfaz de usuario que envía consultas al proceso de búsqueda mediante memoria compartida y semáforos POSIX.
+- Muestra los resultados recibidos desde el proceso de búsqueda.
+
+- Comunicación entre procesos
+- Memoria compartida: `shm_open` + `mmap` para intercambio de consultas y respuestas.
+- Semáforos POSIX para sincronizar envío y recepción de consultas.
+
+- Hashing
+- Se utiliza la librería xxHash incluida en `lib/xxhash` para calcular los hashes de las claves.
+
+## Compilación
+
+Desde el directorio del proyecto:
+```sh
